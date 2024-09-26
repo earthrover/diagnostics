@@ -36,7 +36,6 @@
 # \author Kevin Watts
 
 from __future__ import with_statement
-import roslib
 import rospy
 import traceback
 import threading
@@ -45,7 +44,6 @@ import subprocess
 import socket
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 
-roslib.load_manifest('diagnostic_common_diagnostics')
 low_hd_level = 5 # TODO: make it a param
 critical_hd_level = 1 # TODO: make it a param
 
