@@ -36,7 +36,6 @@
 # \author Kevin Watts
 
 from __future__ import with_statement
-import roslib
 import rospy
 import traceback
 import threading
@@ -45,62 +44,12 @@ import subprocess
 import socket
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 
-roslib.load_manifest('diagnostic_common_diagnostics')
-low_hd_level = 5
-critical_hd_level = 1
+low_hd_level = 5 # TODO: make it a param
+critical_hd_level = 1 # TODO: make it a param
 
-hd_temp_warn = 55  # 3580, setting to 55C to after checking manual
-hd_temp_error = 70  # Above this temperature, hard drives will have serious problems
 
 stat_dict = { 0: 'OK', 1: 'Warning', 2: 'Error' }
-temp_dict = { 0: 'OK', 1: 'Hot', 2: 'Critical Hot' }
 usage_dict = { 0: 'OK', 1: 'Low Disk Space', 2: 'Very Low Disk Space' }
-
-REMOVABLE = ['/dev/sg1', '/dev/sdb'] # Store removable drives so we can ignore if removed
-
-
-# Connects to hddtemp daemon to get temp, HD make.
-def get_hddtemp_data(hostname='localhost', port=7634):
-    try:
-        hd_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        hd_sock.connect((hostname, port))
-        sock_data = b''
-        while True:
-            newdat = hd_sock.recv(1024)
-            if len(newdat) == 0:
-                break
-            sock_data = sock_data + newdat
-        hd_sock.close()
-
-        sock_vals = sock_data.decode().split('|')
-
-        # Format of output looks like ' | DRIVE | MAKE | TEMP | '
-        idx = 0
-
-        drives = []
-        makes = []
-        temps = []
-        while idx + 5 < len(sock_vals):
-            this_drive = sock_vals[idx + 1]
-            this_make = sock_vals[idx + 2]
-            this_temp = sock_vals[idx + 3]
-
-            # Sometimes we get duplicate makes if hard drives are mounted
-            # to two different points
-            if this_make in makes:
-                idx += 5
-                continue
-
-            drives.append(this_drive)
-            makes.append(this_make)
-            temps.append(this_temp)
-
-            idx += 5
-
-        return True, drives, makes, temps
-    except Exception:
-        rospy.logerr(traceback.format_exc())
-        return False, ['Exception'], [traceback.format_exc()], ['0']
 
 
 def update_status_stale(stat, last_update_time):
@@ -147,13 +96,6 @@ class hd_monitor():
         self._temp_timer = None
         self._usage_timer = None
 
-        self._temp_stat = DiagnosticStatus()
-        self._temp_stat.name = "%s HD Temperature" % diag_hostname
-        self._temp_stat.level = DiagnosticStatus.ERROR
-        self._temp_stat.hardware_id = hostname
-        self._temp_stat.message = 'No Data'
-        self._temp_stat.values = [KeyValue(key='Update Status', value='No Data'),
-                                  KeyValue(key='Time Since Last Update', value='N/A')]
 
         if self._home_dir != '':
             self._usage_stat = DiagnosticStatus()
@@ -164,74 +106,11 @@ class hd_monitor():
                                        KeyValue(key='Time Since Last Update', value='N/A')]
             self.check_disk_usage()
 
-        self.check_temps()
-
     # Must have the lock to cancel everything
     def cancel_timers(self):
-        if self._temp_timer:
-            self._temp_timer.cancel()
-            self._temp_timer = None
-
         if self._usage_timer:
             self._usage_timer.cancel()
             self._usage_timer = None
-
-    def check_temps(self):
-        if rospy.is_shutdown():
-            with self._mutex:
-                self.cancel_timers()
-            return
-
-        diag_strs = [KeyValue(key='Update Status', value='OK'),
-                     KeyValue(key='Time Since Last Update', value='0')]
-        diag_level = DiagnosticStatus.OK
-
-        temp_ok, drives, makes, temps = get_hddtemp_data()
-
-        for index in range(0, len(drives)):
-            temp = temps[index]
-
-            if not temp.isnumeric() and drives[index] not in REMOVABLE:
-                temp_level = DiagnosticStatus.ERROR
-                temp_ok = False
-            elif not temp.isnumeric() and drives[index] in REMOVABLE:
-                temp_level = DiagnosticStatus.OK
-                temp = "Removed"
-            else:
-                temp_level = DiagnosticStatus.OK
-                if float(temp) > hd_temp_warn:
-                    temp_level = DiagnosticStatus.WARN
-                if float(temp) > hd_temp_error:
-                    temp_level = DiagnosticStatus.ERROR
-
-            diag_level = max(diag_level, temp_level)
-
-            diag_strs.append(KeyValue(key='Disk %d Temp Status' % index, value=temp_dict[temp_level]))
-            diag_strs.append(KeyValue(key='Disk %d Mount Pt.' % index, value=drives[index]))
-            diag_strs.append(KeyValue(key='Disk %d Device ID' % index, value=makes[index]))
-            diag_strs.append(KeyValue(key='Disk %d Temp' % index, value=temp))
-
-        if not temp_ok:
-            diag_level = DiagnosticStatus.ERROR
-
-        with self._mutex:
-            self._last_temp_time = rospy.get_time()
-            self._temp_stat.values = diag_strs
-            self._temp_stat.level = diag_level
-
-            # Give No Data message if we have no reading
-            self._temp_stat.message = temp_dict[diag_level]
-            if not temp_ok:
-                self._temp_stat.message = 'Error'
-
-            if self._no_temp_warn and temp_ok:
-                self._temp_stat.level = DiagnosticStatus.OK
-
-            if not rospy.is_shutdown():
-                self._temp_timer = threading.Timer(10.0, self.check_temps)
-                self._temp_timer.start()
-            else:
-                self.cancel_timers()
 
     def check_disk_usage(self):
         if rospy.is_shutdown():
@@ -254,7 +133,7 @@ class hd_monitor():
 
                 diag_vals.append(KeyValue(key='Disk Space Reading', value='OK'))
                 row_count = 0
-                for row in stdout.split('\n'):
+                for row in stdout.decode('utf-8').split('\n'):
                     if len(row.split()) < 2:
                         continue
                     if not row.split()[1].isnumeric() or float(row.split()[1]) < 10:  # Ignore small drives
@@ -276,9 +155,9 @@ class hd_monitor():
                     diag_vals.append(KeyValue(
                         key='Disk %d Name' % row_count, value=name))
                     diag_vals.append(KeyValue(
-                        key='Disk %d Available' % row_count, value=g_available))
+                        key='Disk %d Available (GiB)' % row_count, value=g_available))
                     diag_vals.append(KeyValue(
-                        key='Disk %d Size' % row_count, value=size))
+                        key='Disk %d Size (GiB)' % row_count, value=size))
                     diag_vals.append(KeyValue(
                         key='Disk %d Status' % row_count, value=stat_dict[level]))
                     diag_vals.append(KeyValue(
@@ -316,11 +195,9 @@ class hd_monitor():
 
     def publish_stats(self):
         with self._mutex:
-            update_status_stale(self._temp_stat, self._last_temp_time)
 
             msg = DiagnosticArray()
             msg.header.stamp = rospy.get_rostime()
-            msg.status.append(self._temp_stat)
             if self._home_dir != '':
                 update_status_stale(self._usage_stat, self._last_usage_time)
                 msg.status.append(self._usage_stat)
