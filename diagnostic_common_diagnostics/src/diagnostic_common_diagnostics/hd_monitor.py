@@ -155,9 +155,9 @@ class hd_monitor():
                     diag_vals.append(KeyValue(
                         key='Disk %d Name' % row_count, value=name))
                     diag_vals.append(KeyValue(
-                        key='Disk %d Available' % row_count, value=g_available))
+                        key='Disk %d Available (GiB)' % row_count, value=g_available))
                     diag_vals.append(KeyValue(
-                        key='Disk %d Size' % row_count, value=size))
+                        key='Disk %d Size (GiB)' % row_count, value=size))
                     diag_vals.append(KeyValue(
                         key='Disk %d Status' % row_count, value=stat_dict[level]))
                     diag_vals.append(KeyValue(
